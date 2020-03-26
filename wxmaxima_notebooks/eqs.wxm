@@ -1,0 +1,15 @@
+/* [wxMaxima batch file version 1] [ DO NOT EDIT BY HAND! ]*/
+/* [ Created with wxMaxima version 13.04.0 ] */
+
+
+/* [wxMaxima: input   start ] */
+diff(u_z(z),z,1) - %i*k_r*u_r(z) + diff(rho_0(z),z,1)/\rho_0(z) * u_z(z) = 0;
+(%i*\omega + nu0(z)*k_r^2) * u_r(z) - 2*\Omega*u_phi(z) = %i*k_r*p1(z)/rho0(z) + 1/rho0(z) * diff( eta0(z) * diff(u_r(z),z,1), z, 1 );
+(%i*\omega + nu0(z)*k_r^2) * u_phi(z) + \varkappa^2/2/\Omega*u_r(z) = 1/rho0(z) * diff( eta0(z) * diff(u_phi(z),z,1), z, 1 );
+(%i*\omega + nu0(z)*k_r^2) * u_z(z) = -1/rho0(z)*diff(p1(z),z,1) + rho1(z)/rho0(z)^2 * diff(rho0(z),z,1) + 1/rho0(z) * diff( eta0(z) * diff(u_z(z),z,1), z, 1 );
+rho1(z)/rho0(z) * ( %i*\omega + nu0(z)*k_r^2/Pr - nu0(z)/Pr*diff(T0(z),z,2)/T0(z) - alpha_visc*nu0(z)*dlogOmegadlogr^2*\Omega^2 * rho0(z)/p0(z) ) = 2*%i*k_r*nu0(z)*dOmegadlogr*\Omega/c_p*rho0(z)/p0(z)*u_phi(z) + diff( log(p0(z)^(1/gamma)/rho0(z)), z, 1 )*u_z(z) + nu0(z)/Pr*diff(rho1(z)/rho0(z),z,2) + nu0(z)/Pr*diff(T0(z),z,1)/T0(z) * ( (alpha_th+alpha_th^2)/T0(z)*diff(T0(z),z,1)*rho1(z)/rho0(z) + 2*alpha_th*diff(rho1(z)/rho(z),z,1) );
+/* [wxMaxima: input   end   ] */
+
+
+/* Maxima can't load/batch files which end with a comment! */
+"Created with wxMaxima"$

@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+
+
+import numpy as np
+import sympy
+import os.path
+import argparse
+import logging
+from sympy import diff
+from sympy import sqrt, log
+from sympy import I
+from sympy.abc import xi, omega
+
+from polynomials import DifEq
+from polynomials.tools import plotPolynomial, roots_of_matrix
+
+
+logging.basicConfig(level=logging.DEBUG)
+
+
+def omeg0(p, harmonic=0):
+    return 0.9
+    #v = lambda name: p[ sympy.Symbol(name) ]
+    #z0_r = np.sqrt( 2*(v('n')+1) / v('gamma') ) * v('vs_vphi')
+    #return np.sqrt( (4 - v('q')) / ( 1 + ( v('krr') * z0_r / ((harmonic + 0.5) * np.pi) )**2 ) )
+
+parser = argparse.ArgumentParser(description='Compute eigenvalues and eigenfunctions')
+parser.add_argument(
+    '-r', '--resultspath',
+    action='store',
+    default='../data/resuls',
+    help='Directory for output PDFSs'
+)
+parser.add_argument(
+    '-D', '--dumpspath',
+    action='store',
+    default='../data/dumps',
+    help='Directory for dumps'
+)
+
+parser.add_argument(
+    '-k', '--kmax',
+    type=int, dest='k_max', default=20,
+    help='Order of power series for unknowns functions'
+)
+args = parser.parse_args()
+k_max = int(args.k_max)
+dirname = args.resultspath
+dumpsdirname = args.dumpspath
+
+# Introduce parameters
+n = sympy.Symbol('n')
+krr = sympy.Symbol('krr')
+gamma = sympy.Symbol('gamma')
+vs_vphi = sympy.Symbol('vs_vphi')
+l_r = sympy.Symbol('l_r')
+q = sympy.Symbol('q')
+#Pr = sympy.Symbol('Pr')
+alpha_visc = sympy.Symbol('alpha_visc')
+alpha_th = sympy.Symbol('alpha_th')
+cv = sympy.Symbol('cv')
+switch_p1_Eeq = sympy.Symbol('switch_p1_Eeq')
+switch_nabla_j_nonzero = sympy.Symbol('switch_nabla_j_nonzero')
+switch_dOmegadr_jphi = sympy.Symbol('switch_dOmegadr_jphi')
+switch_nabla_kappa_nabla_T_double_alpha_th = sympy.Symbol('switch_nabla_kappa_nabla_T_double_alpha_th')
+switch_nabla_kappa_nabla_T_singla_alpha_th = sympy.Symbol('switch_nabla_kappa_nabla_T_singla_alpha_th')
+switch_kappa_lapl_T = sympy.Symbol('switch_kappa_lapl_T')
+parameters = {
+    n : 1.5,
+    krr : 100.,
+    gamma : 5./3.,
+    vs_vphi : 1e-2,
+    l_r : 1e-2,
+    q : 3., # 3.
+#    Pr : 5./3. * 2.5 / 1.5**2 / 4 /(1.5+1),
+    alpha_visc : 0., # 2.5
+    alpha_th : 0., # 2.5
+    cv : 1.5,
+    switch_p1_Eeq : 1.,
+    switch_nabla_j_nonzero : 1.,
+    switch_dOmegadr_jphi : 1.,
+    switch_nabla_kappa_nabla_T_double_alpha_th : 1.,
+    switch_nabla_kappa_nabla_T_singla_alpha_th : 1.,
+    switch_kappa_lapl_T : 1.,
+}
+
+# Introduce some derivative parameters
+dlogOmegadlogr = -q/2
+cp = cv * gamma
+Pr = cp / dlogOmegadlogr**2 / (n+1)
+Pi1 = 2 * (n + 1)
+z0_r = sqrt(Pi1 / gamma) * vs_vphi
+krz0 = krr * z0_r
+kappa2 = 4 - q
+
+# xi = (z/z0)^2
+# Introduce background vertical distributions p0 and rho0
+zeta = 1 - xi
+p0 = zeta**(n+1)
+rho0 = zeta**n
+nu0 = zeta**(alpha_visc-n)
+eta0 = zeta**alpha_visc
+
+# Introduce unknown functions
+p1 = sympy.Function('p1')
+T1 = sympy.Function('T1')
+vr = sympy.Function('vr')
+vphi = sympy.Function('vphi')
+vzz = sympy.Function('vzz') # vzz == vz / x
+fs = np.array( [ p1, vr, vphi, vzz, T1 ], dtype=sympy.Function )
+
+# Useful combinations of unknowns
+jr = lambda xi: rho0 * vr(xi)
+jphi = lambda xi: rho0 * vphi(xi)
+zz = lambda xi: rho0 * vzz(xi)
+rho1 = lambda xi: p1(xi) / zeta - T1(xi) * zeta**(n-1)
+
+# Some complicated terms of equations
+part_of_rhoNi = lambda ji: vs_vphi * l_r * nu0 * (
+    ji(xi) * (
+        - krr**2 +\
+        - 1/z0_r**2 * 4*xi * diff(nu0, xi, 1)/nu0 * diff(rho0, xi, 1)/rho0 +\
+        - 1/z0_r**2 * ( 4*xi * diff(rho0, xi, 2)/rho0 + 2 * diff(rho0, xi, 1)/rho0 ) +\
+        + 4*xi * 1/z0_r**2 * (diff(rho0, xi, 1)/rho0)**2
+    ) +\
+    1/z0_r**2 * 4*xi * diff(ji(xi), xi, 1) * (
+        + diff(nu0, xi, 1)/nu0 +\
+        - diff(rho0, xi, 1)/rho0
+    ) +\
+    1/z0_r**2 * (
+        + 4*xi * diff(ji(xi), xi, 2) +\
+        + 2 * diff(ji(xi), xi, 1)
+    )
+)
+
+
+# Equations and boundary conditions
+eqs = [
+    (
+        2 * xi * diff(zz(xi),xi,1) +\
+            + zz(xi) +\
+            - I * krz0 * jr(xi) +\
+            + switch_nabla_j_nonzero * I * omega * z0_r * rho1(xi),
+        0
+    ),
+    (
+        I * omega * jr(xi) +\
+            - 2 * jphi(xi) +\
+            - I * krr / gamma * p1(xi) * vs_vphi**2 +\
+            - part_of_rhoNi(jr) +\
+            - vs_vphi * l_r * nu0 * (
+                + I * krr * 1/z0_r * 2*xi * zz(xi) * (
+                    - 4/3 * diff(rho0, xi, 1)/rho0 +\
+                    - 2 * diff(nu0, xi, 1)/nu0
+                ) +\
+                - switch_nabla_j_nonzero * rho1(xi) * 1./3 * krr * omega
+            ),
+        1
+    ),
+    (
+        I * omega * jphi(xi) +\
+            + kappa2 / 2 * jr(xi) +\
+            - part_of_rhoNi(jphi),
+        1
+    ),
+    (
+        I * omega * zz(xi) +\
+            + 2 * vs_vphi / sqrt(Pi1 * gamma) * diff(p1(xi),xi,1) +\
+            + z0_r / zeta * p1(xi) - z0_r * zeta**(n-1) * T1(xi) +\
+            - vs_vphi * l_r * nu0 * (
+                + zz(xi) * (
+                    - krr**2 +\
+                    - 4./3 * 1/z0_r**2 * 4*xi * diff(nu0, xi, 1)/nu0 * diff(rho0, xi, 1)/rho0 +\
+                    - 4./3 * 1/z0_r**2 * ( 4*xi * diff(rho0, xi, 2)/rho0 + 2 * diff(rho0, xi, 1)/rho0 ) +\
+                    + 4./3 * 4*xi * 1/z0_r**2 * (diff(rho0, xi, 1)/rho0)**2
+                ) +\
+                + jr(xi) * I * krr * 1/z0_r * 2 * (
+                    + 2 * diff(nu0, xi, 1)/nu0 +\
+                    - 1./3 * diff(rho0, xi, 1)/rho0
+                ) +\
+                + 2 * 1/z0_r * I * krr * diff(jr(xi), xi, 1) +\
+                + switch_nabla_j_nonzero * rho1(xi) * I * omega * 1/z0_r * 2 * (
+                    + diff(rho0, xi, 1)/rho0 +\
+                    - 4./3 * diff(nu0, xi, 1)/nu0
+                ) +\
+                - switch_nabla_j_nonzero * diff(rho1(xi),xi,1) * 2 * 4./3 * I * omega * 1/z0_r
+            ),
+        1
+    ),
+    (
+        + switch_p1_Eeq * I * omega * (gamma-1) / gamma * p1(xi) +\
+        - I * omega * rho0 * T1(xi) +\
+        - T1(xi) *\
+            (
+                + vs_vphi * l_r * krr**2 * eta0 / Pr +\
+                - 2 * alpha_th / vs_vphi * l_r * gamma / Pi1 / Pr * zeta**(alpha_visc - 1) * ( 2 * xi * diff(zeta,xi,2) + diff(zeta,xi,1) ) +\
+                - alpha_visc * gamma * dlogOmegadlogr**2 / vs_vphi * l_r * zeta**(alpha_visc - 1)
+            ) +\
+            - switch_dOmegadr_jphi * 2*I * krr / cv / vs_vphi * l_r * dlogOmegadlogr * zeta**(alpha_visc - n) * jphi(xi) +\
+            - 2 * ( (n+1)/gamma - n ) / z0_r * xi * diff(zeta,xi,1) * zz(xi) +\
+            + switch_kappa_lapl_T * 2 * gamma / Pi1 / Pr / vs_vphi * l_r * ( 2 * xi * diff(T1(xi),xi,2) + diff(T1(xi),xi,1) ) * eta0 +\
+            + 4 * gamma * alpha_th / Pi1 / Pr / vs_vphi * l_r * eta0 * xi * diff(zeta,xi,1) * ( switch_nabla_kappa_nabla_T_double_alpha_th * (alpha_th+1) * diff(zeta,xi,1)/zeta * T1(xi)/zeta + switch_nabla_kappa_nabla_T_singla_alpha_th * 2 * diff(T1(xi)/zeta,xi,1) ),
+        1
+    ),
+]
+
+boundconds = [
+#    (
+#        p1(xi),
+#        1.
+#    ),
+    (
+        T1(xi),
+        1.
+    ),
+    (
+        2 * vzz(xi) + 4*xi * diff(vzz(xi), xi, 1) - I * krz0 * vr(xi),
+        1.
+    ),
+    (
+        2. * diff(vr(xi), xi, 1) - I * krz0 * vzz(xi),
+        1.
+    ),
+    (
+        diff(vphi(xi), xi, 1),
+        1.
+    ),
+]
+
+# Dumpfile name
+dumpfile = os.path.join(dumpsdirname,
+    'de_krr{krr}_n{n}_kmax{k_max}.pickle'.format(
+        krr = parameters[krr],
+        n = parameters[n],
+        #Pr = parameters[Pr],
+        k_max = k_max,
+    )
+)
+
+#del parameters[krr]
+
+import time
+t1 = time.time()
+de = DifEq(
+    fs,
+    eqs,
+    boundconds,
+    omega,
+    k_max,
+    replace_rule=parameters,
+    #parameters={krr: 100},
+    dumpfile=dumpfile
+)
+logging.debug('DifEq construction: {}s'.format(
+    np.round(time.time() - t1, decimals=3)
+) )
+
+de.dump(dumpfile)
+
+de.parameters = {}# {krr: 100}
+
+omeg_lb = 0.0 + 2.0j
+omeg_rt = 1.0 - 2.0j
+n_omeg = 100
+
+def draw():
+    import time
+    t1 = time.time()
+    de.drawDeterminantMap(
+        np.linspace(omeg_lb.real, omeg_rt.real, n_omeg),
+        np.linspace(omeg_lb.imag, omeg_rt.imag, n_omeg),
+        filename=os.path.join(dirname, 'det_map.pdf')
+    )
+    logging.debug( 'Drawing contour map: {}s'.format(
+        np.round(time.time() - t1, decimals=3)
+    ) )
+
+def calc_all_roots(M_with_eigen_only):
+    import time
+    t1 = time.time()
+    omegs = roots_of_matrix(M_with_eigen_only, x=omega)
+    logging.debug( 'Calculating roots of determinant: {}s'.format(
+        np.round(time.time() - t1, decimals=3)
+    ) )
+    return omegs
+
+def get_good_roots(omegs, f_symbol=sympy.Function('p1'), level=1./k_max):
+    good_omegs = []
+    import time
+    t1 = time.time()
+    for omeg in omegs:
+        de.ev = omeg
+        cs_dict = de.computeEigenFunctions( f_symbol=f_symbol, calibr_k=0 )
+        for cs in cs_dict.values():
+            if abs(cs[-1]) > level:
+                break
+        else:
+            good_omegs.append(omeg)
+    logging.debug( 'Compute eigenfunctions: {}s'.format(
+        np.round(time.time() - t1, decimals=3)
+    ) )
+    return np.asarray(good_omegs)
+
+#draw()
+all_omegs = calc_all_roots( de.matrix.xreplace(de.parameters) )
+good_omegs = get_good_roots(all_omegs, f_symbol=T1, level=1./sqrt(k_max))
+logging.info('Good omegs: {}'.format(good_omegs))
+best_omegs = good_omegs[good_omegs.imag < 0]
+logging.info('Best omegs: {}'.format(best_omegs))
+
+#good_omegs = all_omegs[ (all_omegs.imag < 0) & (np.abs(all_omegs) < 1e3) ]
+if best_omegs.size > 0:
+    target_omeg = best_omegs[0]
+elif good_omegs.size > 0:
+    target_omeg = good_omegs[0]
+else:
+    target_omeg = omeg0(parameters) + 0.1j
+de.findEigenValue( target_omeg )
+logging.info('Eigenvalue: {}'.format(de.ev))
+logging.info('det(A): {}'.format(de.detA))
+
+cs_dict = de.computeEigenFunctions( f_symbol=p1, calibr_k=0 )
+logging.info( 'Normalised coefficients of series:\n{}'.format(cs_dict[T1] / cs_dict[T1][0]) )
+for f in fs:
+    f_is_odd = 'zz' in str(f)
+    plotPolynomial(
+        [ cs_dict[f][i//2] if i%2==f_is_odd else 0 for i in range(cs_dict[f].shape[0]*2) ],
+        filename=os.path.join(
+            dirname,
+            '{}.pdf'.format(str(f))
+        )
+    )
+#for fname, cs in cs_dict.items():
+#    logging.info(fname)
+#    logging.info(cs)
+#    logging.info('#######')
